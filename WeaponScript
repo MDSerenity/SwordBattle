@@ -1,0 +1,271 @@
+//-------------------------------------------------
+// Sword Battle Core Weapon Script v1.0
+// 2/2015 Vega Xue
+//--------------------------------------------
+
+//------------ADJUSTABLE------------------------
+float   BulletVelocity   = 15.0; //Sword Bullet Speed
+float   AttackDelay = 0.30; //Delay between attacks
+vector AimOffset;
+vector AimOffsetConstant = <0.0, 0.0, 0.84>;
+//------------OBJECT NAMES-------------------------------
+string  BulletName = "SwordBullet";
+string AttackSound = "Gasp Male";
+string HoldAnim = "hold_R_handgun";
+//------------ENABLE/DISABLE FLAGS-----------------------
+integer SoundEnabled = 1;
+integer Armed;
+//------------ALIAS--------------------------------------
+integer GripType = ATTACH_RHAND;
+//------------MESSAGES-----------------------------------
+string GripTypeMessage = "this weapon only fits in your right hand";
+//------------DEBUG--------------------------------------
+integer PermGranted;
+
+
+
+
+
+//------------UNSORTED-----------------------------------
+float Stamina;
+integer Armor;
+integer ApplyStaminaDrain = 0;
+
+//-----------FLAGS---------------------------------------
+integer Blocking = 0;
+integer BlockDisabled = 0;
+integer AttackDisabled = 0;
+integer SpecialDisabled = 0;
+integer DashDisabled = 0;
+integer FlyDisabled = 0;
+integer HighJumpDisabled = 0;
+integer MovementDisabled = 0;
+
+
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~FUNCTIONS~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+//Function to get required permissions from an avatar
+integer getPerms()
+{
+    integer perms = llGetPermissions()
+            | PERMISSION_TAKE_CONTROLS
+            | PERMISSION_TRIGGER_ANIMATION
+            | PERMISSION_ATTACH
+            | PERMISSION_TRACK_CAMERA;
+    llRequestPermissions(llGetOwner(), perms);
+    return(perms);
+}
+
+//Function to take avatar controls in mouselook
+arm() {
+    integer perm = PERMISSION_TAKE_CONTROLS | PERMISSION_TRIGGER_ANIMATION;
+    if ((llGetPermissions() & perm) != perm ) {
+        getPerms();
+    } else {
+        llTakeControls(CONTROL_ML_LBUTTON, TRUE, FALSE);
+        llStartAnimation(HoldAnim);
+        Armed = TRUE;
+    }
+}
+
+//Function to release avatar controls when finished
+disarm() {
+    if(llGetAgentSize(llGetPermissionsKey()) != ZERO_VECTOR){
+        llStopAnimation(HoldAnim);
+    }
+    llReleaseControls();
+    Armed = FALSE;
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~STATES~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+default
+{
+    state_entry()
+    {
+        /*if (llGetInventoryType(BulletName) != INVENTORY_OBJECT) {
+            llOwnerSay("This needs a physical object called " + BulletName + " in it to work");
+            return;
+        }*/
+        //-------------------------------------------------------
+        // Reset the sword and all values
+        //------------------------------------------------------
+        Stamina = 100.0;
+        
+        
+        if ( llGetAttached() ){
+            PermGranted = getPerms();
+        }
+    }
+    run_time_permissions(integer perms)
+    {
+         //  ensure ALL required permissions have been granted
+        if (PermGranted)
+        {
+            llTakeControls(CONTROL_ML_LBUTTON, TRUE, FALSE);
+            //llStartAnimation(gShootAnimation);
+            //llOwnerSay("Gun is ready. Enter mouselook and use left click to fire!");
+        }
+        if (perms & (PERMISSION_TAKE_CONTROLS
+                | PERMISSION_TRIGGER_ANIMATION
+                | PERMISSION_ATTACH)) {
+            if (!llGetAttached()) {
+                llAttachToAvatar(GripType);
+            } else if (llGetAttached() != GripType) {
+                llSay(0, GripTypeMessage);
+                llDetachFromAvatar();
+            } else {
+                //verifyInventory();
+                arm();
+            }
+        } else {
+            llSay(0, "insufficient permissions");
+            if (llGetAttached()) llDetachFromAvatar();
+        }
+    }
+    attach(key avatar)
+    {
+        if (avatar)
+           PermGranted = getPerms();
+        else
+        {
+            //llStopAnimation(gShootAnimation);
+            llReleaseControls();
+        }
+        if (avatar != NULL_KEY) {
+            // attaching
+            vector size = llGetAgentSize(avatar);
+            AimOffset = AimOffsetConstant;
+            AimOffset.z *= size.z / 2.0;
+            getPerms();
+        } else {
+            // detaching
+            if (Armed) disarm();
+        }
+    }
+    touch_start(integer count)
+    {
+        if (llDetectedKey(0) != llGetOwner()) {
+            return;
+        } else if (!llGetAttached()) {
+            getPerms();
+        } else if (Armed) {
+            disarm();
+            llOwnerSay("Disarmed");
+            //**THERE IS NO FUNCTION TO REATTACH TO ANOTHER LOCATION(Requires sheath?)
+            //llDetachFromAvatar();
+            //llAttachToAvatar(ATTACH_BACK);
+        } else {
+            arm();
+            llOwnerSay("Armed");
+             //**THERE IS NO FUNCTION TO REATTACH TO ANOTHER LOCATION(Requires sheath?)
+            //llDetachFromAvatar();
+            //llAttachToAvatar(ATTACH_RHAND);
+        }
+    }
+    changed(integer change)
+    {
+        if (change & (CHANGED_OWNER | CHANGED_INVENTORY) )
+            llResetScript();
+    }
+    control(key avatar, integer levels, integer edges)
+    {
+        // mouse press
+        if ((levels & CONTROL_ML_LBUTTON) && (edges & CONTROL_ML_LBUTTON)) {
+        }
+
+        // mouse release
+        if (!(levels & CONTROL_ML_LBUTTON) && (edges & CONTROL_ML_LBUTTON)) {
+            if (SoundEnabled) llTriggerSound(AttackSound, 1.0);
+            rotation rot = llGetRot();
+            vector aim = llRot2Fwd(rot);
+            vector pos = llGetPos() + AimOffset + (aim * 1.0);
+            llRezObject(BulletName, pos, aim * BulletVelocity, rot, 0);
+        }
+
+        // mouse down
+        if ((levels & CONTROL_ML_LBUTTON) && !(edges & CONTROL_ML_LBUTTON)) {
+        }
+    }
+}
+state Defending{
+    state_entry()
+    {
+       //Place in block mode; disable attacking; disable movement
+       Blocking = 1;
+       AttackDisabled = 1;
+       SpecialDisabled = 1;
+       DashDisabled = 1;
+       HighJumpDisabled = 1;
+       MovementDisabled = 1;
+    }   
+}
+
+state Attacking{
+     state_entry()
+    {
+        //Place in attack mode; disable block;Disable Special; disable movement
+        Blocking = 0;
+        BlockDisabled = 1;
+        SpecialDisabled = 1;
+        DashDisabled = 1;
+        HighJumpDisabled = 1;
+        MovementDisabled = 1;
+    }   
+}
+state Special{
+    state_entry()
+    {
+        //Place in special mode on a timer; disable block; disable attack; disable movement
+        Blocking = 0;
+        BlockDisabled = 1;
+        AttackDisabled = 1;
+        DashDisabled = 1;
+        HighJumpDisabled = 1;
+        MovementDisabled = 1;
+    }   
+}
+state Dash{
+    state_entry()
+    {
+       //Disable Block attack and movement on a timer; move quickly in the aformentioned direction
+       Blocking = 0;
+       BlockDisabled = 1;
+       AttackDisabled = 1;
+       SpecialDisabled = 1;
+       FlyDisabled = 1;
+       HighJumpDisabled = 1;
+       MovementDisabled = 1;
+    }   
+}
+state HighJump{
+    state_entry()
+    {
+      //Disable Block and attack on a timer; then move high quickly on the same timer
+      Blocking = 0;
+      BlockDisabled = 1;
+      AttackDisabled = 1;
+      SpecialDisabled = 1;
+      DashDisabled = 1;
+    }   
+}
+state Fly{
+    state_entry()
+    {
+       //Drain Stamina up to 50% on a timer, allow vertical movement
+        ApplyStaminaDrain = 50;
+    }   
+}
+state Dead{
+     state_entry()
+    {
+       //Collapse; disable block; attack; special; jump; movement on a timer
+       Blocking = 0;
+       BlockDisabled = 1;
+       AttackDisabled = 1;
+       SpecialDisabled = 1;
+       DashDisabled = 1;
+       FlyDisabled = 1;
+       HighJumpDisabled = 1;
+       MovementDisabled = 1;
+    }  
+}
